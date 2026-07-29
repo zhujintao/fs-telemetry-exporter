@@ -122,7 +122,7 @@ dependencies = [
 
 [[package]]
 name = "fs-telemetry-exporter"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "aflag",
  "fxhash",
@@ -373,9 +373,9 @@ dependencies = [
 
 [[package]]
 name = "promwrite"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcccde9246bbf3794734733e02748493f4b31fab35a93577a744201c12853e54"
+checksum = "f670350ea08a2006810bcf8bf467506544ab10bf991b4a864094e3cf92898475"
 dependencies = [
  "base64 0.23.0",
  "fxhash",
@@ -795,7 +795,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

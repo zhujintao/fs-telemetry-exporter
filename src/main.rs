@@ -1,5 +1,5 @@
 use fxhash::{FxHashMap, FxHashSet};
-use promwrite::{Metric, MetricBuilder};
+use promwrite::{Metric, MetricBuilder, MetricConfig};
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -67,22 +67,23 @@ fn track_files_change<P: AsRef<Path>>(
         ctx.current_inodes.insert(inode);
         let size = size_bytes as f64;
 
-        match ctx.cache.entry(inode) {
-            std::collections::hash_map::Entry::Occupied(mut occupied) => {
-                occupied.get_mut().metric_handle.set(size);
-            }
-            std::collections::hash_map::Entry::Vacant(vacant) => {
+        ctx.cache
+            .entry(inode)
+            .and_modify(|state| {
+                state.metric_handle.set(size);
+            })
+            .or_insert_with(|| {
                 let path = entry.path();
                 let (d_str, f_str) = extract_labels_str(path);
 
-                let mut metric_handle =
-                    base_metric.clone().label("dir", d_str).label("file", f_str);
+                let mut metric_handle = base_metric
+                    .clone()
+                    .label("dir", d_str)
+                    .label("file", f_str);
 
                 metric_handle.set(size);
-
-                vacant.insert(FileState { metric_handle });
-            }
-        }
+                FileState { metric_handle }
+            });
     }
 
     ctx.total_files_metric.set(total_scanned_files as f64);
@@ -100,7 +101,7 @@ fn track_files_change<P: AsRef<Path>>(
     Ok(())
 }
 
-#[inline]
+#[inline(always)]
 fn extract_labels_str(path: &Path) -> (&str, &str) {
     let parent_path = path.parent().unwrap_or(path);
     let dir_str = parent_path.to_str().unwrap_or("");
@@ -114,23 +115,26 @@ fn extract_labels_str(path: &Path) -> (&str, &str) {
 promwrite::use_jemalloc!();
 
 fn main() {
-    let addr = aflag::flag("endpoint", "prometheus\nremote write api endpoint.")
-        .env("FS_PROMWRITE_ENDPOINT")
-        .default("http://127.0.0.1:9090/api/v1/write");
+    let addr =
+        aflag::flag("endpoint", "prometheus\nremote write api endpoint.")
+            .env("FS_PROMWRITE_ENDPOINT")
+            .default("http://127.0.0.1:9090/api/v1/write");
     let target_dirs = aflag::flag("dir", "target directories to scan.")
         .short('d')
         .tooltip()
         .required::<Vec<String>>();
-    let interval_secs = aflag::flag("interval", "directory scan interval in seconds.")
-        .short('i')
-        .default(15u64);
+    let interval_secs =
+        aflag::flag("interval", "directory scan interval in seconds.")
+            .short('i')
+            .default(15u64);
     let labels_flag = aflag::flag(
         "labels",
         "external static labels to append. e.g., name=haha,env=prod",
     )
     .default(Vec::<String>::new());
-    let size_flag = aflag::flag("size", "only scan files larger than this size. e.g., 10G")
-        .default(None::<u64>);
+    let size_flag =
+        aflag::flag("size", "only scan files larger than this size. e.g., 10G")
+            .default(None::<u64>);
 
     aflag::enable_version!();
     aflag::parse_with_usage(
@@ -175,9 +179,13 @@ promql:
         })
         .collect();
 
-    let client = Metric::new(addr.get());
+    let client = Metric::with_config(MetricConfig {
+        url: addr.get(),
+        ..Default::default()
+    });
 
-    let base_metric = client.name("fs_telemetry_bytes").labels(&parsed_ext_labels);
+    let base_metric =
+        client.name("fs_telemetry_bytes").labels(&parsed_ext_labels);
 
     let mut multi_file_cache: FxHashMap<PathBuf, DirContext> =
         FxHashMap::with_capacity_and_hasher(paths.len(), Default::default());
@@ -198,8 +206,14 @@ promql:
         multi_file_cache.insert(
             p.clone(),
             DirContext {
-                cache: FxHashMap::with_capacity_and_hasher(64, Default::default()),
-                current_inodes: FxHashSet::with_capacity_and_hasher(64, Default::default()),
+                cache: FxHashMap::with_capacity_and_hasher(
+                    1024,
+                    Default::default(),
+                ),
+                current_inodes: FxHashSet::with_capacity_and_hasher(
+                    1024,
+                    Default::default(),
+                ),
                 meta_metric,
                 total_files_metric,
             },
@@ -211,7 +225,8 @@ promql:
 
         for path_key in paths.iter() {
             if let Some(ctx) = multi_file_cache.get_mut(path_key) {
-                let _ = track_files_change(path_key, &base_metric, ctx, min_size);
+                let _ =
+                    track_files_change(path_key, &base_metric, ctx, min_size);
             }
         }
 
